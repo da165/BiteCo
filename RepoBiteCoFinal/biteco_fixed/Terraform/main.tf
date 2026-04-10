@@ -166,5 +166,6 @@ module "ec2_pruebas" {
     ip_seguridad = module.ec2_seguridad.private_ip
     ip_basedatos = module.ec2_basedatos.private_ip
     ip_aws       = module.ec2_aws.private_ip
+    JMETER_VER   ="5.5"
   })
 }
