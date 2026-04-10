@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis_aws
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save ""
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  web:
+    build: .
+    container_name: aws_server
+    command: >
+      sh -c "python manage.py migrate &&
+             gunicorn AWS.wsgi:application
+               --bind 0.0.0.0:8000
+               --workers 9
+               --threads 4
+               --worker-class gthread
+               --timeout 30
+               --log-level info
+               --access-logfile -"
+    volumes:
+      - .:/app
+    ports:
+      - "8001:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/2
+      - JWT_SECRET=biteco-jwt-secret-sprint2-2025
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+

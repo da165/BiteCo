@@ -1,0 +1,8 @@
+django
+djangorestframework
+psycopg2-binary
+requests
+gunicorn
+django-redis
+redis
+PyJWT

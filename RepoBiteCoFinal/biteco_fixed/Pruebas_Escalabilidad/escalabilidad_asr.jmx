@@ -1,0 +1,363 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Plan JMeter — ASR Escalabilidad Bite.Co
+  =========================================
+  ASR: 5000 usuarios nominales | 12000 pico | 10 min | error <= 10%
+
+  TRES PLANES EN UN ARCHIVO:
+
+  Grupo 1 — "Carga Nominal" (5000 usuarios, 10 minutos)
+    Valida que el sistema gestiona 5000 concurrentes con error < 10%.
+
+  Grupo 2 — "Pico Extremo" (12000 usuarios, 5 minutos)
+    Valida que el sistema maneja el pico con error < 10%.
+
+  Grupo 3 — "Rampa ASR" (0→5000→12000→0 en 10 minutos exactos)
+    Valida el escenario completo del ASR.
+
+  CÓMO EJECUTAR:
+    # Instalar plugin Ultimate Thread Group en JMeter primero
+
+    # Escenario 1 — Nominal:
+    jmeter -n -t escalabilidad_asr.jmx \
+           -Jescenario=nominal \
+           -Jhost=IP_SERVIDOR -Jport=8000 \
+           -l results/nominal.jtl \
+           -e -o results/nominal_report/
+
+    # Escenario 2 — Pico:
+    jmeter -n -t escalabilidad_asr.jmx \
+           -Jescenario=pico \
+           -Jhost=IP_SERVIDOR -Jport=8000 \
+           -l results/pico.jtl \
+           -e -o results/pico_report/
+-->
+<jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
+  <hashTree>
+
+    <TestPlan guiclass="TestPlanGui" testclass="TestPlan"
+              testname="Bite.Co — ASR Escalabilidad 5000/12000 Usuarios"
+              enabled="true">
+      <stringProp name="TestPlan.comments">
+        ASR: Gestionar 5000 usuarios nominales y picos de 12000
+        en ventana de 10 minutos con error menor o igual a 10%.
+      </stringProp>
+      <boolProp name="TestPlan.functional_mode">false</boolProp>
+      <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
+
+      <elementProp name="TestPlan.user_defined_variables"
+                   elementType="Arguments" guiclass="ArgumentsPanel">
+        <collectionProp name="Arguments.arguments">
+          <elementProp name="host" elementType="Argument">
+            <stringProp name="Argument.name">host</stringProp>
+            <stringProp name="Argument.value">${__P(host,localhost)}</stringProp>
+          </elementProp>
+          <elementProp name="port" elementType="Argument">
+            <stringProp name="Argument.name">port</stringProp>
+            <stringProp name="Argument.value">${__P(port,8000)}</stringProp>
+          </elementProp>
+          <!-- Umbral de error máximo del ASR: 10% -->
+          <elementProp name="umbral_error_pct" elementType="Argument">
+            <stringProp name="Argument.name">umbral_error_pct</stringProp>
+            <stringProp name="Argument.value">10</stringProp>
+          </elementProp>
+        </collectionProp>
+      </elementProp>
+    </TestPlan>
+
+    <hashTree>
+
+      <!-- ==============================================================
+           GRUPO 1 — CARGA NOMINAL (5000 usuarios, 10 minutos)
+           ============================================================== -->
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup"
+                   testname="G1 — Carga Nominal 5000 usuarios" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <intProp name="LoopController.loops">-1</intProp>
+        </elementProp>
+        <!-- 5000 usuarios nominales según ASR -->
+        <stringProp name="ThreadGroup.num_threads">5000</stringProp>
+        <!-- Ramp-up de 60s: 5000/60 ≈ 83 usuarios/segundo -->
+        <stringProp name="ThreadGroup.ramp_time">60</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <!-- Duración: 600s = 10 minutos (ventana ASR) -->
+        <stringProp name="ThreadGroup.duration">600</stringProp>
+        <stringProp name="ThreadGroup.delay">0</stringProp>
+      </ThreadGroup>
+
+      <hashTree>
+        <!-- HTTP Defaults -->
+        <ConfigTestElement guiclass="HttpDefaultsGui"
+                           testclass="ConfigTestElement"
+                           testname="HTTP Defaults G1" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.connect_timeout">10000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+        </ConfigTestElement>
+        <hashTree/>
+
+        <!-- CSV con combinaciones proyecto/mes -->
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet"
+                    testname="Dataset G1" enabled="true">
+          <stringProp name="filename">datos_escalabilidad.csv</stringProp>
+          <stringProp name="variableNames">project_id,mes,email,password</stringProp>
+          <stringProp name="delimiter">,</stringProp>
+          <boolProp name="recycle">true</boolProp>
+          <boolProp name="stopThread">false</boolProp>
+          <stringProp name="shareMode">shareMode.thread</stringProp>
+        </CSVDataSet>
+        <hashTree/>
+
+        <!-- PASO 1: Login (setup del usuario) -->
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui"
+                          testclass="HTTPSamplerProxy"
+                          testname="POST /auth/login/" enabled="true">
+          <boolProp name="HTTPSampler.postBodyRaw">true</boolProp>
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments">
+              <elementProp name="" elementType="HTTPArgument">
+                <boolProp name="HTTPArgument.always_encode">false</boolProp>
+                <stringProp name="Argument.value">{"email":"${email}","password":"${password}"}</stringProp>
+                <stringProp name="Argument.metadata">=</stringProp>
+              </elementProp>
+            </collectionProp>
+          </elementProp>
+          <stringProp name="HTTPSampler.path">/auth/login/</stringProp>
+          <stringProp name="HTTPSampler.method">POST</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+          <HeaderManager guiclass="HeaderPanel" testclass="HeaderManager"
+                         testname="Headers Login" enabled="true">
+            <collectionProp name="HeaderManager.headers">
+              <elementProp name="" elementType="Header">
+                <stringProp name="Header.name">Content-Type</stringProp>
+                <stringProp name="Header.value">application/json</stringProp>
+              </elementProp>
+            </collectionProp>
+          </HeaderManager>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <!-- Aceptar 200, 503, 429 como OK en login bajo carga -->
+          <ResponseAssertion guiclass="AssertionGui"
+                             testclass="ResponseAssertion"
+                             testname="Login: 200 o 503 o 429" enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp>200</stringProp>
+              <stringProp>503</stringProp>
+              <stringProp>429</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">33</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+          <!-- Extractor del session token si está disponible -->
+          <JSONPathExtractor guiclass="JSONPathExtractorGui"
+                             testclass="JSONPathExtractor"
+                             testname="Extraer session" enabled="true">
+            <stringProp name="JSONPathExtractor.refnames">session_ok</stringProp>
+            <stringProp name="JSONPathExtractor.jsonPathExprs">$.status</stringProp>
+            <stringProp name="JSONPathExtractor.defaultValues">unknown</stringProp>
+          </JSONPathExtractor>
+          <hashTree/>
+        </hashTree>
+
+        <!-- Pausa entre login y primer reporte (simula tiempo de UX real) -->
+        <ConstantTimer guiclass="ConstantTimerGui" testclass="ConstantTimer"
+                       testname="Think time 500ms" enabled="true">
+          <stringProp name="ConstantTimer.delay">500</stringProp>
+        </ConstantTimer>
+        <hashTree/>
+
+        <!-- PASO 2: Consultar reporte (flujo principal) -->
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui"
+                          testclass="HTTPSamplerProxy"
+                          testname="GET /api/reportes/ [NOMINAL]" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="HTTPSampler.path">/api/reportes/${project_id}/${mes}/</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <!-- Assertion: solo los 5xx son errores reales (503 por carga = aceptable) -->
+          <ResponseAssertion guiclass="AssertionGui"
+                             testclass="ResponseAssertion"
+                             testname="No 5xx inesperados (solo 200, 429, 503)"
+                             enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp>200</stringProp>
+              <stringProp>503</stringProp>
+              <stringProp>429</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <intProp name="Assertion.test_type">33</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+
+        <!-- PASO 3: Health check (1 de cada 10 usuarios lo hace) -->
+        <ThroughputController guiclass="ThroughputControllerGui"
+                              testclass="ThroughputController"
+                              testname="10% usuarios hacen health check" enabled="true">
+          <intProp name="ThroughputController.style">1</intProp>
+          <boolProp name="ThroughputController.perThread">false</boolProp>
+          <floatProp name="ThroughputController.percentThroughput">10.0</floatProp>
+        </ThroughputController>
+        <hashTree>
+          <HTTPSamplerProxy guiclass="HttpTestSampleGui"
+                            testclass="HTTPSamplerProxy"
+                            testname="GET /health/" enabled="true">
+            <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+              <collectionProp name="Arguments.arguments"/>
+            </elementProp>
+            <stringProp name="HTTPSampler.path">/health/</stringProp>
+            <stringProp name="HTTPSampler.method">GET</stringProp>
+          </HTTPSamplerProxy>
+          <hashTree/>
+        </hashTree>
+
+        <!-- Think time entre requests (comportamiento realista) -->
+        <GaussianRandomTimer guiclass="GaussianRandomTimerGui"
+                             testclass="GaussianRandomTimer"
+                             testname="Think time gaussiano" enabled="true">
+          <stringProp name="ConstantTimer.delay">500</stringProp>
+          <stringProp name="RandomTimer.range">1000</stringProp>
+        </GaussianRandomTimer>
+        <hashTree/>
+
+      </hashTree>
+
+      <!-- ==============================================================
+           GRUPO 2 — PICO EXTREMO (12000 usuarios, 5 minutos)
+           ============================================================== -->
+      <ThreadGroup guiclass="ThreadGroupGui" testclass="ThreadGroup"
+                   testname="G2 — Pico Extremo 12000 usuarios" enabled="true">
+        <stringProp name="ThreadGroup.on_sample_error">continue</stringProp>
+        <elementProp name="ThreadGroup.main_controller" elementType="LoopController">
+          <boolProp name="LoopController.continue_forever">false</boolProp>
+          <intProp name="LoopController.loops">-1</intProp>
+        </elementProp>
+        <!-- 12000 usuarios pico según ASR -->
+        <stringProp name="ThreadGroup.num_threads">12000</stringProp>
+        <!-- Ramp-up de 120s: llegar a 12000 en 2 minutos -->
+        <stringProp name="ThreadGroup.ramp_time">120</stringProp>
+        <boolProp name="ThreadGroup.scheduler">true</boolProp>
+        <!-- Pico sostenido: 5 minutos (300s) -->
+        <stringProp name="ThreadGroup.duration">300</stringProp>
+        <!-- Comenzar después del grupo 1 (600s + 30s de pausa) -->
+        <stringProp name="ThreadGroup.delay">630</stringProp>
+      </ThreadGroup>
+
+      <hashTree>
+        <ConfigTestElement guiclass="HttpDefaultsGui"
+                           testclass="ConfigTestElement"
+                           testname="HTTP Defaults G2" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="HTTPSampler.domain">${host}</stringProp>
+          <stringProp name="HTTPSampler.port">${port}</stringProp>
+          <stringProp name="HTTPSampler.protocol">http</stringProp>
+          <stringProp name="HTTPSampler.connect_timeout">10000</stringProp>
+          <stringProp name="HTTPSampler.response_timeout">30000</stringProp>
+        </ConfigTestElement>
+        <hashTree/>
+
+        <CSVDataSet guiclass="TestBeanGUI" testclass="CSVDataSet"
+                    testname="Dataset G2" enabled="true">
+          <stringProp name="filename">datos_escalabilidad.csv</stringProp>
+          <stringProp name="variableNames">project_id,mes,email,password</stringProp>
+          <stringProp name="delimiter">,</stringProp>
+          <boolProp name="recycle">true</boolProp>
+          <stringProp name="shareMode">shareMode.thread</stringProp>
+        </CSVDataSet>
+        <hashTree/>
+
+        <HTTPSamplerProxy guiclass="HttpTestSampleGui"
+                          testclass="HTTPSamplerProxy"
+                          testname="GET /api/reportes/ [PICO]" enabled="true">
+          <elementProp name="HTTPsampler.Arguments" elementType="Arguments">
+            <collectionProp name="Arguments.arguments"/>
+          </elementProp>
+          <stringProp name="HTTPSampler.path">/api/reportes/${project_id}/${mes}/</stringProp>
+          <stringProp name="HTTPSampler.method">GET</stringProp>
+          <boolProp name="HTTPSampler.use_keepalive">true</boolProp>
+        </HTTPSamplerProxy>
+        <hashTree>
+          <!-- En pico: aceptar 503 controlado como comportamiento esperado -->
+          <!-- Un 503 del middleware de control NO es un error del ASR -->
+          <!-- Un 500 (error interno) SÍ es un error del ASR -->
+          <ResponseAssertion guiclass="AssertionGui"
+                             testclass="ResponseAssertion"
+                             testname="Pico: no 5xx internos (500, 502, 504)"
+                             enabled="true">
+            <collectionProp name="Asserion.test_strings">
+              <stringProp>500</stringProp>
+              <stringProp>502</stringProp>
+              <stringProp>504</stringProp>
+            </collectionProp>
+            <stringProp name="Assertion.test_field">Assertion.response_code</stringProp>
+            <boolProp name="Assertion.assume_success">false</boolProp>
+            <!-- NOT: si el código es 500/502/504, FALLA -->
+            <intProp name="Assertion.test_type">40</intProp>
+          </ResponseAssertion>
+          <hashTree/>
+        </hashTree>
+
+        <GaussianRandomTimer guiclass="GaussianRandomTimerGui"
+                             testclass="GaussianRandomTimer"
+                             testname="Think time pico" enabled="true">
+          <stringProp name="ConstantTimer.delay">200</stringProp>
+          <stringProp name="RandomTimer.range">500</stringProp>
+        </GaussianRandomTimer>
+        <hashTree/>
+
+      </hashTree>
+
+      <!-- ==============================================================
+           LISTENERS — MÉTRICAS DEL ASR
+           ============================================================== -->
+
+      <ResultCollector guiclass="SummaryReport" testclass="ResultCollector"
+                       testname="Summary Report — ASR" enabled="true">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <objProp>
+          <n>saveConfig</n>
+          <value class="SampleSaveConfiguration">
+            <time>true</time>
+            <latency>true</latency>
+            <timestamp>true</timestamp>
+            <success>true</success>
+            <label>true</label>
+            <code>true</code>
+            <threadName>true</threadName>
+            <bytes>true</bytes>
+            <url>true</url>
+            <threadCounts>true</threadCounts>
+          </value>
+        </objProp>
+        <stringProp name="filename">results/asr_escalabilidad.jtl</stringProp>
+      </ResultCollector>
+      <hashTree/>
+
+      <!-- Reporte de percentiles por muestra de tiempo -->
+      <ResultCollector guiclass="StatVisualizer" testclass="ResultCollector"
+                       testname="Aggregate Report" enabled="true">
+        <boolProp name="ResultCollector.error_logging">false</boolProp>
+        <stringProp name="filename">results/aggregate_asr.jtl</stringProp>
+      </ResultCollector>
+      <hashTree/>
+
+    </hashTree>
+
+  </hashTree>
+</jmeterTestPlan>

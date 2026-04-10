@@ -1,0 +1,112 @@
+version: '3.8'
+
+# =============================================================================
+# Kong API Gateway — Bite.Co Sprint 2
+# =============================================================================
+# Kong actúa como punto de entrada único para todos los microservicios.
+# Flujo de cada request:
+#
+#   Cliente → Kong (puerto 8080) → valida JWT en Seguridad → rutea al servicio
+#
+# Kong se despliega en la misma EC2 que Seguridad, o en una EC2 propia.
+# =============================================================================
+
+services:
+
+  # ── Base de datos de Kong (PostgreSQL independiente) ────────
+  kong-db:
+    image: postgres:15
+    container_name: kong_db
+    environment:
+      POSTGRES_DB:       kong
+      POSTGRES_USER:     kong
+      POSTGRES_PASSWORD: kongpassword
+    volumes:
+      - kong_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kong"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - kong-net
+
+  # ── Inicializar la BD de Kong (corre una sola vez) ──────────
+  kong-migrations:
+    image: kong:3.6
+    container_name: kong_migrations
+    command: kong migrations bootstrap
+    environment:
+      KONG_DATABASE:         postgres
+      KONG_PG_HOST:          kong-db
+      KONG_PG_PORT:          5432
+      KONG_PG_DATABASE:      kong
+      KONG_PG_USER:          kong
+      KONG_PG_PASSWORD:      kongpassword
+    depends_on:
+      kong-db:
+        condition: service_healthy
+    networks:
+      - kong-net
+    restart: on-failure
+
+  # ── Kong Gateway ─────────────────────────────────────────────
+  kong:
+    image: kong:3.6
+    container_name: kong_gateway
+    environment:
+      KONG_DATABASE:         postgres
+      KONG_PG_HOST:          kong-db
+      KONG_PG_PORT:          5432
+      KONG_PG_DATABASE:      kong
+      KONG_PG_USER:          kong
+      KONG_PG_PASSWORD:      kongpassword
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG:  /dev/stderr
+      KONG_ADMIN_ERROR_LOG:  /dev/stderr
+      KONG_ADMIN_LISTEN:     0.0.0.0:8001  # API de administración de Kong
+      KONG_PROXY_LISTEN:     0.0.0.0:8080  # Puerto de entrada para clientes
+    ports:
+      - "8080:8080"   # Clientes llaman aquí (proxy)
+      - "8001:8001"   # Admin API de Kong (solo acceso interno)
+      - "8444:8444"   # HTTPS proxy (opcional)
+    depends_on:
+      kong-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - kong-net
+    restart: unless-stopped
+
+  # ── Konga — Panel de administración visual de Kong ──────────
+  konga:
+    image: pantsel/konga:latest
+    container_name: konga_ui
+    environment:
+      NODE_ENV:    production
+      DB_ADAPTER:  postgres
+      DB_HOST:     kong-db
+      DB_PORT:     5432
+      DB_DATABASE: konga
+      DB_USER:     kong
+      DB_PASSWORD: kongpassword
+    ports:
+      - "1337:1337"   # Interfaz web de Konga
+    depends_on:
+      - kong
+    networks:
+      - kong-net
+    restart: unless-stopped
+
+networks:
+  kong-net:
+    driver: bridge
+
+volumes:
+  kong_db_data:

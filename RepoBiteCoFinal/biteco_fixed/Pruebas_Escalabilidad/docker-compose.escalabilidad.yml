@@ -1,0 +1,137 @@
+version: '3.8'
+
+# =============================================================================
+# docker-compose para ASR de Escalabilidad — Bite.Co
+# =============================================================================
+# Cambios respecto al docker-compose original de Seguridad:
+#
+#   1. Django con Gunicorn (en lugar de runserver)
+#      - 9 workers = (2 × CPU_CORES) + 1 para una EC2 de 4 cores
+#      - --threads 4 por worker → 36 hilos concurrentes por instancia
+#      - Para 5000 usuarios: escalar horizontalmente (ver configuración ALB)
+#
+#   2. Redis como backend de caché (reemplaza locmem)
+#      - Necesario para que el middleware de control de acceso
+#        funcione correctamente en múltiples instancias
+#      - El contador de usuarios activos se comparte entre workers
+#
+#   3. Nginx como proxy inverso
+#      - Buffer de conexiones (acepta el pico de 12000 sin rechazar)
+#      - Worker_connections 4096 por worker
+#      - Timeout configurado para el ASR
+#
+#   4. Health check endpoint activo
+#
+# Para escalar a 5000+ usuarios concurrentes en producción:
+#   - Usar AWS Auto Scaling Group con esta imagen
+#   - Application Load Balancer distribuyendo entre instancias
+#   - Redis ElastiCache para el caché compartido
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Base de datos PostgreSQL
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:15
+    container_name: postgres_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB:       usuariosbitecodb
+      POSTGRES_USER:     postgres
+      POSTGRES_PASSWORD: usuarios
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Redis — Backend de caché compartido entre workers
+  # (OBLIGATORIO para que el middleware de concurrencia funcione con Gunicorn)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    command: >
+      redis-server
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Django con Gunicorn — Servidor de producción
+  # ---------------------------------------------------------------------------
+  web:
+    build: .
+    container_name: django_gunicorn
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn biteco_server.wsgi:application
+               --bind 0.0.0.0:8000
+               --workers 9
+               --threads 4
+               --worker-class gthread
+               --worker-connections 1000
+               --timeout 30
+               --keepalive 5
+               --max-requests 1000
+               --max-requests-jitter 100
+               --log-level info
+               --access-logfile -
+               --error-logfile -"
+    volumes:
+      - .:/app
+      - static_files:/app/staticfiles
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_NAME:     usuariosbitecodb
+      DATABASE_USER:     postgres
+      DATABASE_PASSWORD: usuarios
+      DATABASE_HOST:     db
+      DATABASE_PORT:     "5432"
+      REDIS_URL:         redis://redis:6379/1
+      # Número de workers para dimensionar el sistema
+      GUNICORN_WORKERS:  "9"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Nginx — Buffer de conexiones y proxy inverso
+  # ---------------------------------------------------------------------------
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nginx_proxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_files:/app/staticfiles:ro
+    depends_on:
+      web:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  static_files:
