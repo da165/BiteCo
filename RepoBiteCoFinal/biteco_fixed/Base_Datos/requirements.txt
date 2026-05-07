@@ -6,3 +6,4 @@ gunicorn
 django-redis
 redis
 PyJWT
+python-jose==3.3.0

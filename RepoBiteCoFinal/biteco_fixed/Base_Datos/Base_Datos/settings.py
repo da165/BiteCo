@@ -31,7 +31,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
+    
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
@@ -99,3 +99,14 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 import os
 JWT_SECRET = os.environ.get('JWT_SECRET', 'biteco-jwt-secret-sprint2-2025')
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+import os
+JWT_SECRET = os.environ.get('JWT_SECRET', 'biteco-jwt-secret-sprint2-2025')
+
+
+# ==========================================
+# CONFIGURACIÓN AUTH0 (ESCUDO DE INTEGRIDAD)
+# ==========================================
+AUTH0_DOMAIN = 'dev-l3tn6u1u2ufci03l.us.auth0.com'     # Reemplaza con tu dominio de Auth0
+API_AUDIENCE = 'https://api.biteco.com'   # El Identifier que configuraste en Auth0
